@@ -34,6 +34,8 @@ import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
+import com.sangcomz.fishbun.FishBun;
+import com.sangcomz.fishbun.adapter.image.impl.GlideAdapter;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -52,6 +54,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     private static final int IMAGE_PICKER_REQUEST = 61110;
     private static final int CAMERA_PICKER_REQUEST = 61111;
+    private static final int FISHBUN_REQUEST = 27;
     private static final String E_ACTIVITY_DOES_NOT_EXIST = "E_ACTIVITY_DOES_NOT_EXIST";
 
     private static final String E_PICKER_CANCELLED_KEY = "E_PICKER_CANCELLED";
@@ -352,28 +355,36 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     private void initiatePicker(final Activity activity) {
         try {
-            final Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+            if (!cropping && multiple) {
+                FishBun.with(activity)
+                        .setImageAdapter(new GlideAdapter())
+                        .setRequestCode(FISHBUN_REQUEST)
+                        .setIsUseDetailView(false)
+                        .startAlbum();
+            } else {
+                final Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
 
-            if (cropping || mediaType.equals("photo")) {
-                galleryIntent.setType("image/*");
-                if (cropping) {
-                    String[] mimetypes = {"image/jpeg", "image/png"};
+                if (cropping || mediaType.equals("photo")) {
+                    galleryIntent.setType("image/*");
+                    if (cropping) {
+                        String[] mimetypes = {"image/jpeg", "image/png"};
+                        galleryIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimetypes);
+                    }
+                } else if (mediaType.equals("video")) {
+                    galleryIntent.setType("video/*");
+                } else {
+                    galleryIntent.setType("*/*");
+                    String[] mimetypes = {"image/*", "video/*"};
                     galleryIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimetypes);
                 }
-            } else if (mediaType.equals("video")) {
-                galleryIntent.setType("video/*");
-            } else {
-                galleryIntent.setType("*/*");
-                String[] mimetypes = {"image/*", "video/*"};
-                galleryIntent.putExtra(Intent.EXTRA_MIME_TYPES, mimetypes);
+
+                galleryIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
+                galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+
+                final Intent chooserIntent = Intent.createChooser(galleryIntent, "Pick an image");
+                activity.startActivityForResult(chooserIntent, IMAGE_PICKER_REQUEST);
             }
-
-            galleryIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
-            galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
-
-            final Intent chooserIntent = Intent.createChooser(galleryIntent, "Pick an image");
-            activity.startActivityForResult(chooserIntent, IMAGE_PICKER_REQUEST);
         } catch (Exception e) {
             resultCollector.notifyProblem(E_FAILED_TO_SHOW_PICKER, e);
         }
@@ -683,6 +694,21 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         uCrop.start(activity);
     }
 
+    private void fishBunResult(Activity activity, final int requestCode, final int resultCode, final Intent data) {
+        if (resultCode == Activity.RESULT_OK) {
+            ArrayList<Uri> path = data.getParcelableArrayListExtra("intent_path");
+
+            try {
+                resultCollector.setWaitCount(path.size());
+                for (int i = 0; i < path.size(); i++) {
+                    getAsyncSelection(activity, path.get(i), false);
+                }
+            } catch (Exception ex) {
+                resultCollector.notifyProblem(E_NO_IMAGE_DATA_FOUND, ex.getMessage());
+            }
+        }
+    }
+
     private void imagePickerResult(Activity activity, final int requestCode, final int resultCode, final Intent data) {
         if (resultCode == Activity.RESULT_CANCELED) {
             resultCollector.notifyProblem(E_PICKER_CANCELLED_KEY, E_PICKER_CANCELLED_MSG);
@@ -791,7 +817,9 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
     @Override
     public void onActivityResult(Activity activity, final int requestCode, final int resultCode, final Intent data) {
-        if (requestCode == IMAGE_PICKER_REQUEST) {
+        if (requestCode == FISHBUN_REQUEST) {
+            fishBunResult(activity, requestCode, resultCode, data);
+        } else if (requestCode == IMAGE_PICKER_REQUEST) {
             imagePickerResult(activity, requestCode, resultCode, data);
         } else if (requestCode == CAMERA_PICKER_REQUEST) {
             cameraPickerResult(activity, requestCode, resultCode, data);
