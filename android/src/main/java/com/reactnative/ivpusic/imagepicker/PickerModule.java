@@ -13,6 +13,7 @@ import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
 import android.util.Base64;
 import android.webkit.MimeTypeMap;
@@ -488,7 +489,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             return null;
         }
 
-        return getImage(activity, path);
+        return getImage(activity, path, uri);
     }
 
     private void getAsyncSelection(final Activity activity, Uri uri, boolean isCamera) throws Exception {
@@ -504,7 +505,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             return;
         }
 
-        resultCollector.notifySuccess(getImage(activity, path));
+        resultCollector.notifySuccess(getImage(activity, path, uri));
     }
 
     private Bitmap validateVideo(String path) throws Exception {
@@ -585,13 +586,21 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         return path;
     }
 
-    private BitmapFactory.Options validateImage(String path) throws Exception {
+    private BitmapFactory.Options validateImage(String path, Uri uri) throws Exception {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
         options.inPreferredConfig = Bitmap.Config.RGB_565;
         options.inDither = true;
 
-        BitmapFactory.decodeFile(path, options);
+        if (Build.VERSION.SDK_INT >= 29) {
+            ParcelFileDescriptor pfd = this.reactContext.getContentResolver().openFileDescriptor(uri, "r");
+
+            if (pfd != null) {
+                BitmapFactory.decodeFileDescriptor(pfd.getFileDescriptor(), null, options);
+            }
+        } else {
+            BitmapFactory.decodeFile(path, options);
+        }
 
         if (options.outMimeType == null || options.outWidth == 0 || options.outHeight == 0) {
             throw new Exception("Invalid image selected");
@@ -600,19 +609,19 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
         return options;
     }
 
-    private WritableMap getImage(final Activity activity, String path) throws Exception {
+    private WritableMap getImage(final Activity activity, String path, Uri uri) throws Exception {
         WritableMap image = new WritableNativeMap();
 
         if (path.startsWith("http://") || path.startsWith("https://")) {
             throw new Exception("Cannot select remote files");
         }
-        BitmapFactory.Options original = validateImage(path);
+        BitmapFactory.Options original = validateImage(path, uri);
 
         // if compression options are provided image will be compressed. If none options is provided,
         // then original image will be returned
         File compressedImage = compression.compressImage(this.reactContext, options, path, original);
         String compressedImagePath = compressedImage.getPath();
-        BitmapFactory.Options options = validateImage(compressedImagePath);
+        BitmapFactory.Options options = validateImage(compressedImagePath, uri);
         long modificationDate = new File(path).lastModified();
 
         image.putString("path", "file://" + compressedImagePath);
